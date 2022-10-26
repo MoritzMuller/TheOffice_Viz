@@ -1,0 +1,113 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+#Libraries
+```{r}
+library(dplyr)
+library(quanteda)
+library(xlsx)
+library(stringr)
+library(vegan)
+```
+
+#Load data
+```{r}
+spoken <- read.xlsx(file="data/TheOffice_transcripts.xlsx", sheetName="Sheet1")
+stats <- read.csv(file="data/the_office_series.csv")
+```
+
+#manipulation
+```{r}
+spoken$episode <- substr(spoken$Text, 4,5)
+spoken$season <- substr(spoken$Text, 1,2)
+spoken$uniqueid <- substr(spoken$Text, 1, 5)
+spoken$eTitle <- sub("^.* - ", "", spoken$Text)
+spoken$line <- sub("^.*: ", "", spoken$Field)
+names(spoken)[names(spoken) == 'Field1'] <- "speaker"
+
+
+```
+
+#wrangling
+```{r}
+# Theatricality - how many gestures are indicated in the manuscript
+spoken$theatric <- grepl("[", spoken$line, fixed = TRUE)
+spoken <- spoken %>% group_by(uniqueid) %>% mutate(total_theater=sum(theatric==TRUE)/sum(theatric==FALSE))
+
+# Jim face 
+spoken$Jim_face <- ifelse(grepl("looks at the camera", spoken$line, fixed=TRUE)==TRUE, TRUE, FALSE)
+
+## Tried multiple different version of it, but script is not precise enough to isolate instances where Jim looks into the camera
+
+# THATS WHAT SHE SAID
+spoken$twss <- grepl("hat's what she said", spoken$line, fixed=FALSE)
+spoken <- spoken %>% group_by(uniqueid) %>% mutate(twss=sum(twss))
+
+#Shannon H
+##first collapse speakers per episode
+spoken_collapsed <-
+  spoken %>% 
+  filter(!is.na(line)) %>% 
+  group_by(uniqueid) %>% 
+    summarize(
+    speakers = paste0(speaker, collapse = " "),
+    doc_id = first(uniqueid),
+    episode=first(episode),
+    season = first(season),
+    total_theater = first(total_theater),
+    twss=first(twss),
+    etitle=first(eTitle)
+  )
+
+## delete bonus scenes and webisodes 
+spoken_collapsed <- spoken_collapsed[spoken_collapsed$episode!="99" &spoken_collapsed$episode!="00"&spoken_collapsed$episode!="29"&spoken_collapsed$episode!="30",]
+
+## create dfm to as a shortcut to get speaker per document counts of the lines that are spoken in every document
+spoken_dfm <- quanteda::dfm(tokens(spoken_collapsed$speakers))
+
+## calculate Shannon H with the dfm (works surprisingly well)
+spoken_collapsed$diversity <- diversity(spoken_dfm, index="shannon")
+
+# Share of lines 
+x <- dfm_select(spoken_dfm, names(topfeatures(spoken_dfm, n = 23)))
+x <- as.data.frame(as.matrix(x))
+x$total <- rowSums(x[,1:23])
+x[,1:23] <- x[,1:23]/x[,24]
+
+## bind counts to 
+final <- data.frame(spoken_collapsed, x)
+```
+# merge stats and spoken datasets
+```{r}
+#clean final episode name tag
+final$etitle <- sub("\\(Parts 1&2\\)", "", final$etitle)
+final$etitle <- sub("\\(Part 1\\)", "", final$etitle)
+final$etitle <- sub("\\(Part 2\\)", "", final$etitle)
+
+#clean episode number
+final <- final %>% group_by(season) %>% mutate(episodeCorrected=row_number())
+
+final$uniqueid <- paste0(substr(final$season, 2,2), "x", final$episodeCorrected)
+
+#merge
+BI_data <- left_join(final, stats, by=c("etitle" = "EpisodeTitle"))
+## doesn't work properly because some of the titles are not exactly the same
+
+stats <- stats %>% group_by(Season) %>% mutate(episodeCorrected=row_number())
+
+stats <- stats[-c(96,109),] #these are part 1 and part 2 episodes that are already summarized in final. Ratings are the same, so I collapse them. 
+
+stats$uniqueid <- paste0(stats$Season, "x", stats$episodeCorrected)
+
+
+BI_data <- left_join(final, stats, by=c("uniqueid"))
+# DONE
+
+# save
+write.csv(BI_data, file="data/BI_data.csv", sep=",")
+write.xlsx2(BI_data, file = "data/BI_data.xlsx", sheetName = "Sheet1")
+
+```
+
