@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 #Libraries
@@ -106,8 +108,7 @@ BI_data <- left_join(final, stats, by=c("uniqueid"))
 # DONE
 
 # save
-write.csv(BI_data, file="data/BI_data.csv", sep=",")
-write.xlsx2(BI_data, file = "data/BI_data.xlsx", sheetName = "Sheet1")
+write.csv(BI_data, file="data/TheOffice_data.csv", sep=",")
 
 ```
 
